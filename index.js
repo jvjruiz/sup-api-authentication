@@ -3,6 +3,7 @@ var bodyParser = require('body-parser');
 var mongoose = require('mongoose');
 var User = require('./models/user');
 var Message = require('./models/message');
+var bcrypt = require('bcryptjs');
 
 var app = express();
 
@@ -17,18 +18,91 @@ app.get('/users', function(req, res) {
 });
 
 app.post('/users', jsonParser, function(req, res) {
+ 
+    if(!req.body) {
+        return res.status(400).json({
+            message: "No request body"
+        });
+    }
     
-    User.create({username: req.body.username}, function(err, user) {
-
-        if(!req.body.username) {
-            return res.status(422).json({'message': 'Missing field: username'});
-        } else if(typeof req.body.username !== 'string') {
-            return res.status(422).json({'message': 'Incorrect field type: username'})
+    if(!req.body.username) {
+        return res.status(422).json({
+            'message': 'Missing field: username'
+        });
+    } 
+    
+    var username = req.body.username;
+    
+    if(typeof username !== 'string') {
+        return res.status(422).json({
+            'message': 'Incorrect field type: username'
+        })
+    }
+    
+    username = username.trim();
+    
+    if (username === '') {
+        return res.status(422).json({
+            message: 'Incorrect field length: username'
+        });
+    }
+    
+    if(!('password' in req.body)) {
+        return res.status(422).json({
+            message: 'Incorrect field length: username'
+        });
+    }
+    
+    var password = req.body.password;
+    
+    if (password === '') {
+        return res.status(422).json({
+            message: 'Incorrect field length: password'
+        });
+    }
+    
+    bcrypt.genSalt(10, function(err, salt) {
+        //console.log('yougotsalt')
+        if (err) {
+            return res.status(500).json({
+                message: 'Internal server error'
+            });
         }
         
-        res.status(201).location('/users/' + user._id).json({});
+        bcrypt.hash(password, salt, function(err, hash) {
+             //console.log('you got hash')
+             console.log(password)
+             console.log(salt)
+             console.log(hash)
+             if (err) {
+            return res.status(500).json({
+                message: 'Internal server error'
+            });
+            }
+            
+            var user = new User({
+                username: username,
+                password: hash
+            });
+            
+            console.log(user)
+            
+            user.save(function(err) {
+                if (err) {
+                    console.log(err)
+                    return res.status(500).json({
+                        message: 'Internal server error'
+                    });
+                }
+                
+                return res.status(201).json({message:"User added"});
+            });
+        });
+        
     });
+    
 });
+
 
 app.get("/users/:userId", function(req, res) {
     var id = req.params.userId;
