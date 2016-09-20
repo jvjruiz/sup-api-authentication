@@ -52,13 +52,25 @@ app.get('/hidden' , passport.authenticate('basic', {session: false}), function(r
     });
 });
 
-app.get('/users', function(req, res) {
-    User.find({}, function(err, user) { //blank obj means it searches for EVERYTHING
+app.get('/users',passport.authenticate('basic', {session: false}), function(req, res) {
+    var adminId = "57e18279ac42e01e9e2d5f9d"
+    var requestId = req.user._id
+    console.log(requestId)
+    console.log(adminId)
+    
+    if(requestId != adminId) {
+        res.status(401).json({ message: "Security level not high enough"
+        });
+    }
+    
+    else {
+        User.find({}, function(err, user) { //blank obj means it searches for EVERYTHING
         res.json(user);
-    });
+        });
+    }
 });
 
-app.post('/users', passport.authenticate('basic' , {session: false}), jsonParser, function(req, res) {
+app.post('/users', jsonParser, function(req, res) {
  
     if(!req.body) {
         return res.status(400).json({
@@ -188,9 +200,22 @@ app.get('/messages', passport.authenticate('basic' , {session: false}), function
 //  Query db for all Messages with from or to that equal req.user's id
 //   response with result
 
+var authenticatedUser = req.user;
+
 var username = req.user.username
 var password = req.user.password
 var user = req.user._id
+
+//  /messages    == all messages sent TO authenticated user
+//  /messages?folder=sent     - all messages sent FROM authenticated user
+//    /messages/:messageID   -- req.params.messageID
+
+// if (!req.query.folder) return all messages with `to:` === authenticated user's id
+Message.find({ to: authenticatedUser._id }).populate('from to').exec(function(err, messages){
+    
+})
+
+//  /messages?from=xxx&to=xxx   - all messages per queries ONLY with authenticated ADMIN user
 
 
     // console.log(username)
@@ -256,12 +281,21 @@ app.post('/messages', passport.authenticate('basic' , {session: false}), jsonPar
 });
 
 app.get("/messages/:messageId", passport.authenticate('basic' , {session: false}), function(req, res) {
+    
+    var userId = req.user._id.toString();
+    
     var msgID = req.params.messageId;
     Message
         .findOne({_id: msgID})
         //change parameter
         .populate('to from')
         .exec(function(err, message){
+            
+            var msgUserFromId = message.from._id.toString();
+            var msgUserToId = message.to._id.toString();
+            
+            
+            
             if(err) {
                 console.error(err);
                 return res.sendStatus(500);
@@ -270,8 +304,14 @@ app.get("/messages/:messageId", passport.authenticate('basic' , {session: false}
                 console.log("you're in");
                 return res.status(404).json({"message": "Message not found"});   
             }
-            console.log(message);
-            return res.status(200).json(message);
+                console.log(message);
+            if (userId === msgUserFromId || userId === msgUserToId) {
+                    return res.status(200).json(message);
+            }
+            
+            return res.status(404).json({
+                    "message": "Cannot retrieve unauthorized message"
+            });
         });
 });
 
