@@ -4,12 +4,53 @@ var mongoose = require('mongoose');
 var User = require('./models/user');
 var Message = require('./models/message');
 var bcrypt = require('bcryptjs');
-
+var passport = require("passport")
+var BasicStrategy = require("passport-http").BasicStrategy
 var app = express();
 
 var jsonParser = bodyParser.json();
 
 //API endpoints for USERS
+
+var strategy = new BasicStrategy(function(username, password, callback) {
+    User.findOne({
+        username: username
+    }, function (err, user) {
+        if (err) {
+            callback(err);
+            return;
+        }
+
+        if (!user) {
+            return callback(null, false, {
+                message: 'Incorrect username.'
+            });
+        }
+
+        user.validatePassword(password, function(err, isValid) {
+            if (err) {
+                return callback(err);
+            }
+
+            if (!isValid) {
+                return callback(null, false, {
+                    message: 'Incorrect password.'
+                });
+            }
+            return callback(null, user);
+        });
+    });
+});
+
+passport.use(strategy);
+
+app.use(passport.initialize());
+
+app.get('/hidden' , passport.authenticate('basic', {session: false}), function(req, res){
+    res.json({
+        message: "luke I am your Father"
+    });
+});
 
 app.get('/users', function(req, res) {
     User.find({}, function(err, user) { //blank obj means it searches for EVERYTHING
@@ -17,7 +58,7 @@ app.get('/users', function(req, res) {
     });
 });
 
-app.post('/users', jsonParser, function(req, res) {
+app.post('/users', passport.authenticate('basic' , {session: false}), jsonParser, function(req, res) {
  
     if(!req.body) {
         return res.status(400).json({
@@ -62,7 +103,7 @@ app.post('/users', jsonParser, function(req, res) {
     }
     
     bcrypt.genSalt(10, function(err, salt) {
-        //console.log('yougotsalt')
+        console.log('yougotsalt')
         if (err) {
             return res.status(500).json({
                 message: 'Internal server error'
@@ -70,10 +111,10 @@ app.post('/users', jsonParser, function(req, res) {
         }
         
         bcrypt.hash(password, salt, function(err, hash) {
-             //console.log('you got hash')
-             console.log(password)
-             console.log(salt)
-             console.log(hash)
+            //  console.log('you got hash')
+            //  console.log(password)
+            //  console.log(salt)
+            //  console.log(hash)
              if (err) {
             return res.status(500).json({
                 message: 'Internal server error'
@@ -104,7 +145,7 @@ app.post('/users', jsonParser, function(req, res) {
 });
 
 
-app.get("/users/:userId", function(req, res) {
+app.get("/users/:userId", passport.authenticate('basic' , {session: false}), function(req, res) {
     var id = req.params.userId;
     User.findOne({_id: id}, function(err, user) {
         if(!user) {
@@ -116,7 +157,7 @@ app.get("/users/:userId", function(req, res) {
     
 });
 
-app.put("/users/:userId", jsonParser, function(req, res) {
+app.put("/users/:userId", passport.authenticate('basic' , {session: false}), jsonParser, function(req, res) {
     var id = req.params.userId;
     var newName = req.body.username;
     if(!newName) {
@@ -130,7 +171,7 @@ app.put("/users/:userId", jsonParser, function(req, res) {
     });
 });
 
-app.delete("/users/:userId", jsonParser, function(req,res) {
+app.delete("/users/:userId", passport.authenticate('basic' , {session: false}), jsonParser, function(req,res) {
    var id = req.params.userId;
    User.findOneAndRemove({_id: id}, function(err, user ) {
       if (!user) {
@@ -142,19 +183,39 @@ app.delete("/users/:userId", jsonParser, function(req,res) {
 
 //API endpoints for MESSAGES
 
-app.get('/messages', function(req,res) {
+app.get('/messages', passport.authenticate('basic' , {session: false}), function(req,res) {
+//    verified user is at req.user;
+//  Query db for all Messages with from or to that equal req.user's id
+//   response with result
+
+var username = req.user.username
+var password = req.user.password
+var user = req.user._id
+
+
+    // console.log(username)
+    // console.log(password)
+    // console.log(req.user._id)
+
    var messages = [];
    var options = [{path: 'from'}, {path: 'to'}]; 
    var query = req.query; 
-   
-    Message.find(query)
-    .populate('from to')
-    .exec(function(err,message) {
-        return res.status(200).json(message);
-    });
+   console.log(query)
+    //if user ID matches to or from ID show messages
+    // if(req.query.from == req.user._id || req.query.to == req.user._id) {
+        Message.find(query)
+        .populate('from to')
+        .exec(function(err,message) {
+            return res.status(200).json(message);
+        });
+    // }
+    
+    // else {
+       // res.status(401).json({"Message":"Gtfo"});
+    //}
 });
 
-app.post('/messages', jsonParser, function(req, res) {
+app.post('/messages', passport.authenticate('basic' , {session: false}), jsonParser, function(req, res) {
     if(!req.body.text) {
            return res.status(422).json({"message": "Missing field: text"});
        }else if(typeof(req.body.text) !== "string") {
@@ -164,36 +225,41 @@ app.post('/messages', jsonParser, function(req, res) {
        }else if(typeof(req.body.from) !== "string") {
            return res.status(422).json({"message": "Incorrect field type: from"});
        }
-       console.log(req.body);
-      
-    User.findOne({ _id: req.body.to }) //checks if query passes(syntax errors only)
-        .then(function(user){ 
-            //checks if user is found/not
-            if (!user) return res.status(422).json({ message: 'Incorrect field value: to'});
-            return User.findOne({ _id: req.body.from }); // to continue chain, must return new Promise(check query again)
-        })
-        .then(function(user) { //chain continues
-            if (!user) return res.status(422).json({ message: 'Incorrect field value: from'});
-            
-           Message.create(req.body, function(err, message) {
-               //console.log(message);
-               if(err) {
-                   console.error(err);
-                   return res.sendStatus(500);
-               }
-                return res.status(201).location("/messages/" + message._id).json({});
-           });
-        }) //catch runs when there is query runs into an error
-        .catch(function(err){
-            console.error(err);
-            return res.sendStatus(500);
-        });
+    
+    if(req.body.from == req.user._id){  //checks to make sure that the from ID matches the currently logged in user
+        User.findOne({ _id: req.body.to }) //checks if query passes(syntax errors only)
+            .then(function(user){ 
+                //checks if user is found/not
+                if (!user) return res.status(422).json({ message: 'Incorrect field value: to'});
+                return User.findOne({ _id: req.body.from }); // to continue chain, must return new Promise(check query again)
+            })
+            .then(function(user) { //chain continues
+                if (!user) return res.status(422).json({ message: 'Incorrect field value: from'});
+                
+               Message.create(req.body, function(err, message) {
+                   //console.log(message);
+                   if(err) {
+                       console.error(err);
+                       return res.sendStatus(500);
+                   }
+                    return res.status(201).location("/messages/" + message._id).json({});
+               });
+            }) //catch runs when there is query runs into an error
+            .catch(function(err){
+                console.error(err);
+                return res.sendStatus(500);
+            });
+    }
+    else {
+        return res.status(403).json({message:"gtfo hacker"})
+    }
 });
 
-app.get("/messages/:messageId", function(req, res) {
+app.get("/messages/:messageId", passport.authenticate('basic' , {session: false}), function(req, res) {
     var msgID = req.params.messageId;
     Message
         .findOne({_id: msgID})
+        //change parameter
         .populate('to from')
         .exec(function(err, message){
             if(err) {
@@ -208,6 +274,9 @@ app.get("/messages/:messageId", function(req, res) {
             return res.status(200).json(message);
         });
 });
+
+
+
 
 var runServer = function(callback) {
     var databaseUri = process.env.DATABASE_URI || global.databaseUri || 'mongodb://localhost/sup';
